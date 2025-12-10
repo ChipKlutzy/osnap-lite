@@ -152,6 +152,30 @@ contract OptimisticExecutor {
         emit Proposed(proposalId, assertionId, msg.sender);
     }
 
+    // shortcut: local expiration instead of oo.getAssertion, avoids OOV3 struct drift across versions. Upgrade when UI needs dispute timestamps.
+    function settle(bytes32 proposalId) external {
+        Proposal storage p = proposals[proposalId];
+        require(p.proposer != address(0), "no proposal");
+        oo.settleAssertion(p.assertionId);
+    }
+
+    function assertionResolvedCallback(bytes32 assertionId, bool assertedTruthfully) external {
+        require(msg.sender == address(oo), "not OO");
+        bytes32 proposalId = assertionToProposal[assertionId];
+        require(proposals[proposalId].proposer != address(0), "no proposal");
+        proposals[proposalId].settled = true;
+        proposals[proposalId].truthful = assertedTruthfully;
+        emit Settled(proposalId, assertedTruthfully);
+    }
+
+    function assertionDisputedCallback(bytes32 assertionId) external {
+        require(msg.sender == address(oo), "not OO");
+        bytes32 proposalId = assertionToProposal[assertionId];
+        require(proposals[proposalId].proposer != address(0), "no proposal");
+        proposals[proposalId].disputed = true;
+        emit Disputed(proposalId);
+    }
+
     function _toHex(address a) internal pure returns (string memory) {
         bytes32 v = bytes32(uint256(uint160(a)));
         bytes16 alphabet = "0123456789abcdef";

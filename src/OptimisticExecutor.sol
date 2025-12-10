@@ -97,4 +97,95 @@ contract OptimisticExecutor {
         vetoManager = _vetoManager;
     }
 
+    function propose(
+        address to,
+        uint256 value,
+        bytes calldata data,
+        uint8 operation,
+        string calldata explanation
+    ) external returns (bytes32 proposalId, bytes32 assertionId) {
+        require(!paused, "paused");
+        require(to != address(0), "bad to");
+        require(operation <= 1, "bad op");
+
+        uint256 minBond = oo.getMinimumBond(address(currency));
+        uint256 useBond = bond > minBond ? bond : minBond;
+
+        bytes memory claim = abi.encodePacked(
+            "Safe tx to 0x",
+            _toHex(to),
+            " value ",
+            _toStr(value),
+            " dataHash ",
+            _toHex(keccak256(data)),
+            " chain ",
+            _toStr(block.chainid),
+            " vote ",
+            explanation
+        );
+
+        require(currency.transferFrom(msg.sender, address(this), useBond), "bond pull failed");
+        require(currency.approve(address(oo), useBond), "approve failed");
+
+        assertionId = oo.assertTruth(
+            claim, msg.sender, address(this), address(0), liveness, currency, useBond, identifier, bytes32(0)
+        );
+
+        proposalId = keccak256(abi.encode(to, value, keccak256(data), operation, explanation, nonce++));
+        require(proposals[proposalId].proposer == address(0), "exists");
+
+        proposals[proposalId] = Proposal({
+            to: to,
+            value: value,
+            data: data,
+            operation: operation,
+            proposer: msg.sender,
+            assertionId: assertionId,
+            expiration: uint64(block.timestamp) + liveness,
+            settled: false,
+            truthful: false,
+            disputed: false,
+            executed: false
+        });
+        assertionToProposal[assertionId] = proposalId;
+
+        emit Proposed(proposalId, assertionId, msg.sender);
+    }
+
+    function _toHex(address a) internal pure returns (string memory) {
+        bytes32 v = bytes32(uint256(uint160(a)));
+        bytes16 alphabet = "0123456789abcdef";
+        bytes memory s = new bytes(40);
+        for (uint256 i = 0; i < 20; i++) {
+            s[i * 2] = alphabet[uint8(v[i + 12]) >> 4];
+            s[i * 2 + 1] = alphabet[uint8(v[i + 12]) & 0xf];
+        }
+        return string(s);
+    }
+
+    function _toHex(bytes32 v) internal pure returns (string memory) {
+        bytes16 alphabet = "0123456789abcdef";
+        bytes memory s = new bytes(64);
+        for (uint256 i = 0; i < 32; i++) {
+            s[i * 2] = alphabet[uint8(v[i]) >> 4];
+            s[i * 2 + 1] = alphabet[uint8(v[i]) & 0xf];
+        }
+        return string(s);
+    }
+
+    function _toStr(uint256 v) internal pure returns (string memory) {
+        if (v == 0) return "0";
+        uint256 len;
+        uint256 t = v;
+        while (t > 0) {
+            len++;
+            t /= 10;
+        }
+        bytes memory s = new bytes(len);
+        while (v > 0) {
+            s[--len] = bytes1(uint8(48 + v % 10));
+            v /= 10;
+        }
+        return string(s);
+    }
 }

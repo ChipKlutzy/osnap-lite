@@ -176,6 +176,30 @@ contract OptimisticExecutor {
         emit Disputed(proposalId);
     }
 
+    function canExecute(bytes32 proposalId) public view returns (bool) {
+        Proposal storage p = proposals[proposalId];
+        if (p.proposer == address(0) || p.executed || !p.settled || !p.truthful || p.disputed || paused) return false;
+        return true;
+    }
+
+    function execute(bytes32 proposalId) external returns (bool) {
+        require(canExecute(proposalId), "cannot execute");
+        proposals[proposalId].executed = true;
+        Proposal storage p = proposals[proposalId];
+        require(safe.execTransactionFromModule(p.to, p.value, p.data, p.operation), "safe exec failed");
+        emit Executed(proposalId);
+        return true;
+    }
+
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+        emit Paused(_paused);
+    }
+
+    function setVetoManager(address _vetoManager) external onlyOwner {
+        vetoManager = _vetoManager;
+    }
+
     function _toHex(address a) internal pure returns (string memory) {
         bytes32 v = bytes32(uint256(uint160(a)));
         bytes16 alphabet = "0123456789abcdef";

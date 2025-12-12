@@ -33,6 +33,7 @@ contract MockOOV3 is IOOV3Min {
     uint256 public minBond = 1e15;
     uint256 public n;
     mapping(bytes32 => address) public callback;
+    mapping(bytes32 => bool) public willFail;
 
     function setMinBond(uint256 b) external {
         minBond = b;
@@ -61,9 +62,15 @@ contract MockOOV3 is IOOV3Min {
     function settleAssertion(bytes32 assertionId) external {
         address cb = callback[assertionId];
         require(cb != address(0), "no assertion");
-        OptimisticExecutor(payable(cb)).assertionResolvedCallback(assertionId, true);
+        OptimisticExecutor(payable(cb)).assertionResolvedCallback(assertionId, !willFail[assertionId]);
     }
 
+    function dispute(bytes32 assertionId) external {
+        address cb = callback[assertionId];
+        require(cb != address(0), "no assertion");
+        OptimisticExecutor(payable(cb)).assertionDisputedCallback(assertionId);
+        willFail[assertionId] = true;
+    }
 }
 
 contract MockSafe is ISafeMin {
@@ -124,6 +131,14 @@ contract OptimisticExecutorTest {
         ex.execute(pid);
         (address to,,,) = safe.calls(0);
         require(to == address(0xCAFE), "wrong to");
+    }
+
+    function testDisputeBlocks() public {
+        _approve();
+        (bytes32 pid, bytes32 aid) = ex.propose(address(0xCAFE), 0, hex"1234", 0, "vote yes");
+        oo.dispute(aid);
+        ex.settle(pid); // resolves false after dispute in mock
+        require(!ex.canExecute(pid), "disputed must block");
     }
 
 }

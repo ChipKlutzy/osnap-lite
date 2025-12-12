@@ -179,6 +179,7 @@ contract OptimisticExecutor {
     function canExecute(bytes32 proposalId) public view returns (bool) {
         Proposal storage p = proposals[proposalId];
         if (p.proposer == address(0) || p.executed || !p.settled || !p.truthful || p.disputed || paused) return false;
+        if (vetoManager != address(0) && IVetoManager(vetoManager).isVetoed(proposalId)) return false;
         return true;
     }
 

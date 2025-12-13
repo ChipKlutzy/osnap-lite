@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import "../src/OptimisticExecutor.sol";
+import "../src/VetoManager.sol";
 
 contract MockERC20 is IERC20Min {
     mapping(address => uint256) public balanceOf;
@@ -96,6 +97,7 @@ contract OptimisticExecutorTest {
     MockERC20 ccy;
     MockOOV3 oo;
     MockSafe safe;
+    VetoManager veto;
     OptimisticExecutor ex;
 
     address user = address(0xBEEF);
@@ -104,6 +106,7 @@ contract OptimisticExecutorTest {
         ccy = new MockERC20();
         oo = new MockOOV3();
         safe = new MockSafe();
+        veto = new VetoManager();
         ex = new OptimisticExecutor(
             address(safe),
             address(oo),
@@ -111,7 +114,7 @@ contract OptimisticExecutorTest {
             7200,
             1e15,
             bytes32("ASSERT_TRUTH2"),
-            address(0)
+            address(veto)
         );
         ccy.mint(user, 1 ether);
     }
@@ -141,4 +144,27 @@ contract OptimisticExecutorTest {
         require(!ex.canExecute(pid), "disputed must block");
     }
 
+    function testVetoBlocks() public {
+        _approve();
+        (bytes32 pid,) = ex.propose(address(0xCAFE), 0, hex"1234", 0, "vote yes");
+        ex.settle(pid);
+        veto.setVeto(pid, true);
+        require(!ex.canExecute(pid), "veto must block");
+    }
+
+    function testReplayAndPause() public {
+        _approve();
+        (bytes32 pid,) = ex.propose(address(0xCAFE), 0, hex"1234", 0, "vote yes");
+        ex.settle(pid);
+        ex.execute(pid);
+        bool ok;
+        try ex.execute(pid) {
+            ok = true;
+        } catch {
+            ok = false;
+        }
+        require(!ok, "replay must revert");
+        ex.setPaused(true);
+        require(!ex.canExecute(pid), "paused");
+    }
 }

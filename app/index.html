@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>osnap-lite — optimistic Safe executor</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  fieldset { margin-bottom: 1rem; } label { display: block; margin: .4rem 0; }
+  input, textarea { width: 100%; } button { margin: .3rem .3rem .3rem 0; }
+  .ok { color: green; } .bad { color: red; }
+</style>
+</head>
+<body>
+<h1>osnap-lite</h1>
+<p>Propose Safe tx → assert via UMA OOV3 → settle → execute. Sepolia only.</p>
+
+<fieldset>
+  <legend>1. Connect + addresses</legend>
+  <button id="connect">Connect wallet</button> <span id="acct"></span><br />
+  <label>Executor <input id="ex" placeholder="0x..." /></label>
+  <label>Bond currency (ERC20) <input id="ccy" placeholder="0x..." /></label>
+</fieldset>
+
+<fieldset>
+  <legend>2. Propose</legend>
+  <label>To <input id="to" placeholder="0x..." /></label>
+  <label>Value (wei) <input id="val" value="0" /></label>
+  <label>Data (hex) <input id="data" value="0x" /></label>
+  <label>Operation (0 call, 1 delegatecall) <input id="op" value="0" /></label>
+  <label>Offchain vote / explanation <textarea id="exp" rows="2">pay contributors June</textarea></label>
+  <button id="approve">Approve bond (max)</button>
+  <button id="propose">Propose + assert</button>
+  <div id="propOut"></div>
+</fieldset>
+
+<fieldset>
+  <legend>3. Track / settle / execute</legend>
+  <label>Proposal id <input id="pid" placeholder="0x..." /></label>
+  <button id="refresh">Refresh status</button>
+  <button id="settle">Settle (OO)</button>
+  <button id="exec">Execute (Safe)</button>
+  <div id="status"></div>
+</fieldset>
+
+<fieldset>
+  <legend>4. Guardian</legend>
+  <button id="veto">Veto proposal</button> <span>Veto manager: <span id="vetoAddr"></span></span>
+</fieldset>
+
+<!-- shortcut: static page + viem CDN instead of Next.js build. Upgrade to Next.js + wagmi when portfolio needs SSR/routing. -->
+<script type="importmap">
+{ "imports": { "viem": "https://esm.sh/viem@2.21.0", "viem/chains": "https://esm.sh/viem@2.21.0/chains" } }
+</script>
+<script type="module">
+import { createWalletClient, createPublicClient, custom, http, parseAbi } from "viem";
+import { sepolia, anvil } from "viem/chains";
+
+const exAbi = parseAbi([
+  "function propose(address,uint256,bytes,uint8,string) returns (bytes32,bytes32)",
+  "function settle(bytes32)",
+  "function execute(bytes32) returns (bool)",
+  "function canExecute(bytes32) view returns (bool)",
+  "function proposals(bytes32) view returns (address,uint256,bytes,uint8,address,bytes32,uint64,bool,bool,bool,bool)",
+  "function vetoManager() view returns (address)",
+]);
+const vetoAbi = parseAbi(["function setVeto(bytes32,bool)", "function isVetoed(bytes32) view returns (bool)"]);
+const erc20Abi = parseAbi(["function approve(address,uint256) returns (bool)"]);
+
+let wallet, pub, account, chain = sepolia;
+const $ = (id) => document.getElementById(id);
+const saved = JSON.parse(localStorage.getItem("osnap") || "{}");
+if (saved.ex) $("ex").value = saved.ex;
+if (saved.ccy) $("ccy").value = saved.ccy;
+if (saved.pid) $("pid").value = saved.pid;
+
+$("connect").onclick = async () => {
+  if (!window.ethereum) return alert("no wallet");
+  const id = Number(await window.ethereum.request({ method: "eth_chainId" }));
+  chain = id === 31337 ? anvil : sepolia; // local anvil demo or Sepolia
+  wallet = createWalletClient({ chain, transport: custom(window.ethereum) });
+  pub = createPublicClient({ chain, transport: id === 31337 ? http("http://127.0.0.1:8545") : custom(window.ethereum) });
+  [account] = await wallet.requestAddresses();
+  $("acct").textContent = account;
+};
+
+$("approve").onclick = async () => {
+  const hash = await wallet.writeContract({ address: $("ccy").value, abi: erc20Abi, functionName: "approve", args: [$("ex").value, 2n ** 256n - 1n], account });
+  $("propOut").textContent = "approve tx: " + hash;
+};
+
+$("propose").onclick = async () => {
+  const hash = await wallet.writeContract({
+    address: $("ex").value, abi: exAbi, functionName: "propose",
+    args: [$("to").value, BigInt($("val").value), $("data").value, Number($("op").value), $("exp").value], account,
+  });
+  const r = await pub.waitForTransactionReceipt({ hash });
+  const pid = r.logs[0].topics[1];
+  $("pid").value = pid;
+  localStorage.setItem("osnap", JSON.stringify({ ex: $("ex").value, ccy: $("ccy").value, pid }));
+  $("propOut").innerHTML = `proposed <span class="ok">${pid}</span> (tx ${hash})`;
+};
+
+$("refresh").onclick = async () => {
+  const pid = $("pid").value;
+  const p = await pub.readContract({ address: $("ex").value, abi: exAbi, functionName: "proposals", args: [pid] });
+  const [to, value, data, op, proposer, aid, exp, settled, truthful, disputed, executed] = p;
+  const ok = await pub.readContract({ address: $("ex").value, abi: exAbi, functionName: "canExecute", args: [pid] });
+  const left = Number(exp) - Math.floor(Date.now() / 1000);
+  $("vetoAddr").textContent = await pub.readContract({ address: $("ex").value, abi: exAbi, functionName: "vetoManager" });
+  $("status").innerHTML =
+    `to ${to} value ${value} op ${op}<br>proposer ${proposer}<br>assertion ${aid}<br>` +
+    `settled ${settled} truthful ${truthful} disputed ${disputed} executed ${executed}<br>` +
+    `liveness left ~${left}s — <b class="${ok ? "ok" : "bad"}">canExecute: ${ok}</b>`;
+};
+
+$("settle").onclick = async () => {
+  const hash = await wallet.writeContract({ address: $("ex").value, abi: exAbi, functionName: "settle", args: [$("pid").value], account });
+  $("status").textContent = "settle tx: " + hash;
+};
+
+$("exec").onclick = async () => {
+  const hash = await wallet.writeContract({ address: $("ex").value, abi: exAbi, functionName: "execute", args: [$("pid").value], account });
+  $("status").textContent = "execute tx: " + hash;
+};
+
+$("veto").onclick = async () => {
+  const v = await pub.readContract({ address: $("ex").value, abi: exAbi, functionName: "vetoManager" });
+  const hash = await wallet.writeContract({ address: v, abi: vetoAbi, functionName: "setVeto", args: [$("pid").value, true], account });
+  $("status").textContent = "veto tx: " + hash;
+};
+</script>
+</body>
+</html>

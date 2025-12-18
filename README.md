@@ -13,6 +13,8 @@ Portfolio piece: oSnap-style DAO execution without oSnap dep (deprecated Dec 202
 
 Uses `assertTruth` with explicit `ASSERT_TRUTH2`. Never `assertTruthWithDefaults` (reverts since deprecation).
 
+Safe sources for mastercopy deploy (gitignored): `forge install --no-git safe-global/safe-smart-account@v1.3.0`.
+
 ## Test + audit
 
 ```bash

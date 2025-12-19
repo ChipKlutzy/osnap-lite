@@ -13,26 +13,35 @@ AUTH="--rpc-url $RPC --account $ACC --password-file $PW"
 
 OOV3=0x0F7fC5E6482f096380db6158f978167b57388deE
 CCY=0x7E6d9618Ba8a87421609352d6e711958A97e2512
-FACTORY=0xC22834581EbC75e54b9eD9206a05c2c50658A9b8
-LIVENESS=7200
+LIVENESS=${LIVENESS:-7200}
 BOND=0
 ID=$(cast --format-bytes32-string "ASSERT_TRUTH" 2>/dev/null)
 SALT=777001
 
+echo "== 0. GnosisSafeProxyFactory (none on base-sepolia)"
+FACTORY=${FACTORY:-$(forge create lib/safe-smart-account/contracts/proxies/GnosisSafeProxyFactory.sol:GnosisSafeProxyFactory \
+  $AUTH --broadcast --json 2>/dev/null | jq -r .deployedTo)}
+echo "FACTORY=$FACTORY"
+
 echo "== 1. GnosisSafe mastercopy"
-SINGLETON=$(forge create lib/safe-smart-account/contracts/GnosisSafe.sol:GnosisSafe \
-  $AUTH --broadcast --json 2>/dev/null | jq -r .deployedTo)
+SINGLETON=${SINGLETON:-$(forge create lib/safe-smart-account/contracts/GnosisSafe.sol:GnosisSafe \
+  $AUTH --broadcast --json 2>/dev/null | jq -r .deployedTo)}
 echo "SINGLETON=$SINGLETON"
 
+if [ -z "${SAFE:-}" ]; then
 echo "== 2. Safe proxy (1/1 owner)"
 INIT=$(cast calldata "setup(address[],uint256,address,bytes,address,address,uint256,address)" "[$OWNER]" 1 0x0000000000000000000000000000000000000000 0x 0x0000000000000000000000000000000000000000 0x0000000000000000000000000000000000000000 0 0x0000000000000000000000000000000000000000 2>/dev/null)
 TX=$(cast send $FACTORY "createProxyWithNonce(address,bytes,uint256)" $SINGLETON $INIT $SALT \
   $AUTH --json 2>/dev/null | jq -r .transactionHash)
-SAFE=$(cast receipt $TX --rpc-url $RPC --json 2>/dev/null | jq -r '.logs[0].topics[1] | "0x"+.[26:]')
+SAFE=$(cast receipt $TX --rpc-url $RPC --json 2>/dev/null | jq -r '.logs[] | select(.topics[0]=="0x4f51faf6c4561ff95f067657e43439f0f856d97c04d9ec9070a6199ad418e235") | ("0x"+(.data[26:66]))')
 echo "SAFE=$SAFE tx=$TX"
+[ -z "$SAFE" ] || [ "$SAFE" = "0x" ] && { echo "proxy parse failed"; exit 1; }
+else
+echo "== 2. reuse SAFE=$SAFE"
+fi
 
 echo "== 3. VetoManager + Executor"
-VETO=$(forge create src/VetoManager.sol:VetoManager $AUTH --broadcast --json 2>/dev/null | jq -r .deployedTo)
+VETO=${VETO:-$(forge create src/VetoManager.sol:VetoManager $AUTH --broadcast --json 2>/dev/null | jq -r .deployedTo)}
 EX=$(forge create src/OptimisticExecutor.sol:OptimisticExecutor $AUTH --broadcast --json \
   --constructor-args "$SAFE" $OOV3 $CCY $LIVENESS $BOND "$ID" "$VETO" 2>/dev/null | jq -r .deployedTo)
 echo "VETO=$VETO"

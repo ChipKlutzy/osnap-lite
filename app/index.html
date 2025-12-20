@@ -54,7 +54,17 @@
 </script>
 <script type="module">
 import { createWalletClient, createPublicClient, custom, http, parseAbi } from "viem";
-import { sepolia, anvil } from "viem/chains";
+import { sepolia, baseSepolia, anvil } from "viem/chains";
+
+const CHAINS = { 1: sepolia, 11155111: sepolia, 84532: baseSepolia, 31337: anvil };
+const RPCS = { 84532: "https://sepolia.base.org", 31337: "http://127.0.0.1:8545" };
+const LIVE = {
+  84532: {
+    ex: "0xb29B98104AF6a958E468DEbE9c1755451AEad23F",
+    ccy: "0x7E6d9618Ba8a87421609352d6e711958A97e2512",
+    safe: "0xcb71baacd18ec3d56b09c326977f25560f21113f",
+  },
+};
 
 const exAbi = parseAbi([
   "function propose(address,uint256,bytes,uint8,string) returns (bytes32,bytes32)",
@@ -77,11 +87,12 @@ if (saved.pid) $("pid").value = saved.pid;
 $("connect").onclick = async () => {
   if (!window.ethereum) return alert("no wallet");
   const id = Number(await window.ethereum.request({ method: "eth_chainId" }));
-  chain = id === 31337 ? anvil : sepolia; // local anvil demo or Sepolia
+  chain = CHAINS[id] || sepolia; // local anvil demo, Sepolia or Base Sepolia
   wallet = createWalletClient({ chain, transport: custom(window.ethereum) });
-  pub = createPublicClient({ chain, transport: id === 31337 ? http("http://127.0.0.1:8545") : custom(window.ethereum) });
+  pub = createPublicClient({ chain, transport: RPCS[id] ? http(RPCS[id]) : custom(window.ethereum) });
   [account] = await wallet.requestAddresses();
   $("acct").textContent = account;
+  if (LIVE[id] && !$("ex").value) { $("ex").value = LIVE[id].ex; $("ccy").value = LIVE[id].ccy; }
 };
 
 $("approve").onclick = async () => {

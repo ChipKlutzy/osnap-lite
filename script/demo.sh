@@ -40,6 +40,21 @@ TX=$(cast send --unlocked --from $ME $EX "propose(address,uint256,bytes,uint8,st
 PID=$(cast receipt $TX --rpc-url $RPC --json | jq -r '.logs[0].topics[1]')
 echo "proposal=$PID"
 
+if [ "${1:-}" = "dispute" ]; then
+echo "== dispute drill (malicious proposal gets blocked)"
+AID=$(cast receipt $TX --rpc-url $RPC --json | jq -r '.logs[0].topics[2]')
+cast send --unlocked --from $ME $OO "dispute(bytes32)" $AID --rpc-url $RPC --silent > /dev/null
+cast send --unlocked --from $ME $EX "settle(bytes32)" $PID --rpc-url $RPC --silent > /dev/null
+echo -n "canExecute after dispute: "; cast call $EX "canExecute(bytes32)(bool)" $PID --rpc-url $RPC
+if cast send --unlocked --from $ME $EX "execute(bytes32)" $PID --rpc-url $RPC 2>&1 | grep -qi "revert\|cannot execute"; then
+  echo "execute reverted as expected"
+else
+  echo "DRILL FAILED: disputed proposal executed"; exit 1
+fi
+echo "OK dispute drill complete"
+exit 0
+fi
+
 echo "== settle"
 cast send --unlocked --from $ME $EX "settle(bytes32)" $PID --rpc-url $RPC --silent > /dev/null
 echo -n "canExecute: "; cast call $EX "canExecute(bytes32)(bool)" $PID --rpc-url $RPC

@@ -1,7 +1,7 @@
 # oSnap-lite — Optimistic Safe Executor (PLAN)
 
-> Status: PLAN ONLY. No code yet. No commits until approved.
-> Staging dir: `new-chapter/projects/osnap-lite` — rename with one `mv` once repo name picked.
+> Status: DONE + PUSHED. Both live cycles closed (5-min + 2h production params) on Base Sepolia. Dispute drill green. Portfolio card live. Public repo: github.com/ChipKlutzy/osnap-lite.
+> Staging dir: `new-chapter/projects/osnap-lite` — name locked.
 
 ## 1. Goal
 
